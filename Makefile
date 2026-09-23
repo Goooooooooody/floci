@@ -5,10 +5,14 @@
 #
 # Service-matrix docs: docs/services/index.md's Service Matrix table is checked
 # against ResolvedServiceCatalog.java so a registered service can't ship undocumented.
+#
+# Partition literals: hardcoded arn:aws: prefixes, amazonaws.com hosts and hosted-zone
+# ids in src/main are inventoried against tools/partition/baseline.tsv so the
+# commercial-partition assumption can only shrink. See tools/partition/.
 
 PYTHON ?= python3
 
-.PHONY: docs-sync docs-check docs-test
+.PHONY: docs-sync docs-check docs-test partition-check partition-baseline partition-audit partition-test
 
 docs-sync: ## Regenerate the action tables in docs/services from handler source (in place)
 	$(PYTHON) tools/docs/regen_action_docs.py
@@ -45,3 +49,20 @@ docs-check: ## CI gate: regenerate and fail if anything is stale, unregistered, 
 
 docs-test: ## Run the docs tooling's unit tests
 	$(PYTHON) -m pytest tools/docs -q
+
+partition-check: ## CI gate: partition literals in src/main must match tools/partition/baseline.tsv
+	@$(PYTHON) tools/partition/partition_literals.py --check || { \
+		echo ""; \
+		echo "error: partition literals drifted from tools/partition/baseline.tsv (see above)."; \
+		echo "       Fix the new literal, or run 'make partition-baseline' after removing some."; \
+		exit 1; \
+	}
+
+partition-baseline: ## Regenerate tools/partition/baseline.tsv from the current tree (commit the result)
+	$(PYTHON) tools/partition/partition_literals.py --write-baseline
+
+partition-audit: ## Print the per-package table of remaining partition literals
+	@$(PYTHON) tools/partition/partition_literals.py --audit
+
+partition-test: ## Run the partition tooling's unit tests
+	$(PYTHON) -m pytest tools/partition -q
