@@ -1,6 +1,7 @@
 package io.github.hectorvent.floci.services.codepipeline;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import io.github.hectorvent.floci.config.EmulatorConfig;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -56,7 +57,6 @@ public class CodePipelineService {
     private static final String DEFAULT_PIPELINE_TYPE = "V1";
     private static final int MAX_ACTIVE_EXECUTIONS = 50;
     private static final long POLL_INTERVAL_MS = 100L;
-    private static final long SOURCE_POLL_INTERVAL_MS = 500L;
     private static final String SOURCE_POLL_TYPE = "source-poll";
     private static final String MISSING_SOURCE_REVISION = "missing";
 
@@ -77,12 +77,36 @@ public class CodePipelineService {
     // until the running execution finished.
     private final KeyedLockPool startLocks = new KeyedLockPool();
     private final Map<String, byte[]> runtimeArtifacts = new ConcurrentHashMap<>();
+    /** Matches the {@code source-poll-interval-ms} default in application.yml. */
+    private static final long DEFAULT_SOURCE_POLL_INTERVAL_MS = 500L;
+
+    private final long sourcePollIntervalMs;
+
+    /**
+     * Package-private constructor for the tests that build the service without CDI. The source
+     * poll interval falls back to the configured default.
+     */
+    CodePipelineService(StorageFactory storageFactory, ObjectMapper mapper,
+                        CodeBuildService codeBuildService, CodeDeployService codeDeployService,
+                        LambdaService lambdaService, S3Service s3Service) {
+        this(storageFactory, mapper, codeBuildService, codeDeployService, lambdaService, s3Service,
+                DEFAULT_SOURCE_POLL_INTERVAL_MS);
+    }
 
     @Inject
-    @SuppressWarnings("unchecked")
     public CodePipelineService(StorageFactory storageFactory, ObjectMapper mapper,
                                CodeBuildService codeBuildService, CodeDeployService codeDeployService,
-                               LambdaService lambdaService, S3Service s3Service) {
+                               LambdaService lambdaService, S3Service s3Service,
+                               EmulatorConfig config) {
+        this(storageFactory, mapper, codeBuildService, codeDeployService, lambdaService, s3Service,
+                config.services().codepipeline().sourcePollIntervalMs());
+    }
+
+    @SuppressWarnings("unchecked")
+    private CodePipelineService(StorageFactory storageFactory, ObjectMapper mapper,
+                                CodeBuildService codeBuildService, CodeDeployService codeDeployService,
+                                LambdaService lambdaService, S3Service s3Service,
+                                long sourcePollIntervalMs) {
         this.pipelineStore = storageFactory.create(
                 "codepipeline", "codepipeline-pipelines.json", new TypeReference<Map<String, CodePipelinePipeline>>() {});
         this.executionStore = storageFactory.create(
@@ -94,6 +118,7 @@ public class CodePipelineService {
         this.codeDeployService = codeDeployService;
         this.lambdaService = lambdaService;
         this.s3Service = s3Service;
+        this.sourcePollIntervalMs = sourcePollIntervalMs;
     }
 
     public JsonNode handle(String action, JsonNode request, String region, String account) {
@@ -170,7 +195,7 @@ public class CodePipelineService {
         }
         initializePersistedSourcePollingBaselines();
         sourcePoller.scheduleWithFixedDelay(
-                this::pollS3SourcesSafely, SOURCE_POLL_INTERVAL_MS, SOURCE_POLL_INTERVAL_MS, TimeUnit.MILLISECONDS);
+                this::pollS3SourcesSafely, sourcePollIntervalMs, sourcePollIntervalMs, TimeUnit.MILLISECONDS);
     }
 
     private void initializePersistedSourcePollingBaselines() {

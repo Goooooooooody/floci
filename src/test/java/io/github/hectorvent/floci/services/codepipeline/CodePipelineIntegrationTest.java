@@ -373,7 +373,7 @@ class CodePipelineIntegrationTest {
                 """))
                 .then().statusCode(200);
 
-        Thread.sleep(1200);
+        Thread.sleep(240);
         post("ListPipelineExecutions", """
                 {"pipelineName": "%s"}
                 """.formatted(pipelineName))
@@ -402,7 +402,7 @@ class CodePipelineIntegrationTest {
                 .statusCode(200)
                 .body(equalTo("changed artifact"));
 
-        Thread.sleep(1200);
+        Thread.sleep(240);
         post("ListPipelineExecutions", """
                 {"pipelineName": "%s"}
                 """.formatted(pipelineName))
@@ -459,7 +459,7 @@ class CodePipelineIntegrationTest {
                 """))
                 .then().statusCode(200);
 
-        Thread.sleep(700);
+        Thread.sleep(140);
         post("ListPipelineExecutions", """
                 {"pipelineName": "%s"}
                 """.formatted(pipelineName))
@@ -530,7 +530,7 @@ class CodePipelineIntegrationTest {
                 .then().statusCode(200);
 
         putObject("codepipeline-poll-disabled-source", "source.zip", "changed artifact");
-        Thread.sleep(1200);
+        Thread.sleep(240);
 
         post("ListPipelineExecutions", """
                 {"pipelineName": "%s"}
