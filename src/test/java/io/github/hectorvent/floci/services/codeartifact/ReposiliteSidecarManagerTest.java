@@ -18,8 +18,10 @@ import java.util.Optional;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -80,6 +82,21 @@ class ReposiliteSidecarManagerTest {
         verify(lifecycleManager).stopAndRemove("stale-reposilite", null);
         assertNull(getField(manager, "containerId"));
         verifyNoInteractions(containerBuilder);
+    }
+
+    @Test
+    void isStartedIsFalseUntilEnsureReadyResolvesAnEndpointAndNeverStartsAnythingItself() throws IOException {
+        String url = startFakeSidecar(200, "{\"status\":\"UP\"}");
+        when(codeArtifact.mavenUrl()).thenReturn(Optional.of(url));
+        when(codeArtifact.mavenToken()).thenReturn(Optional.of("alice:s3cr3t"));
+        ReposiliteSidecarManager manager = manager();
+
+        assertFalse(manager.isStarted());
+        verifyNoInteractions(containerBuilder, lifecycleManager);
+
+        manager.ensureReady();
+
+        assertTrue(manager.isStarted());
     }
 
     private ReposiliteSidecarManager manager() {

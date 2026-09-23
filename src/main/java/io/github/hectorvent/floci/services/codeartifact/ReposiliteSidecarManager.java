@@ -70,6 +70,18 @@ public class ReposiliteSidecarManager {
         this.managedSecret = managedSecret;
     }
 
+    /**
+     * Whether {@link #ensureReady()} has ever resolved an endpoint (managed container or
+     * pre-configured URL) in this process. Never starts anything itself, unlike
+     * {@link #ensureReady()}: a caller that only needs to release storage if there could possibly
+     * be any (Reposilite keeps no volume, so nothing survives a container that was never started)
+     * checks this first, instead of paying to start the sidecar just to find out it has nothing to
+     * release.
+     */
+    public boolean isStarted() {
+        return resolvedUrl != null;
+    }
+
     /** Base URL of a ready Reposilite instance, starting the managed container if needed. */
     public synchronized String ensureReady() {
         if (resolvedUrl != null) {
