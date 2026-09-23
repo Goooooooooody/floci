@@ -21,14 +21,17 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -1056,6 +1059,100 @@ class BatchServiceTest {
                   "computeEnvironmentOrder":[{"order":1,"computeEnvironment":"%s"}]
                 }
                 """.formatted(suffix, computeArn)), REGION).path("jobQueueArn").asText();
+    }
+
+    // ── teardown (one hold of the lock: look-up, disable, delete) ────────────
+
+    @Test
+    void teardownDisablesAndDeletesAnEnabledComputeEnvironmentAndIsIdempotent() throws Exception {
+        BatchService service = immediateService(new InMemoryStorage<String, BatchJob>());
+        String arn = service.createComputeEnvironment(json("""
+                {"computeEnvironmentName":"td-ce","type":"MANAGED"}
+                """), REGION).path("computeEnvironmentArn").asText();
+        assertEquals("ENABLED", service.describeComputeEnvironments(json(
+                "{\"computeEnvironments\":[\"td-ce\"]}")).path("computeEnvironments").get(0).path("state").asText());
+
+        assertTrue(service.teardownComputeEnvironment(arn), "an ENABLED environment is disabled then deleted");
+        assertTrue(service.describeComputeEnvironments(json("{\"computeEnvironments\":[\"td-ce\"]}"))
+                .path("computeEnvironments").isEmpty());
+        assertFalse(service.teardownComputeEnvironment(arn), "a repeat counts the environment as gone");
+    }
+
+    @Test
+    void teardownRefusesAComputeEnvironmentStillAttachedToAQueueUntilTheQueueIsGone() throws Exception {
+        BatchService service = immediateService(new InMemoryStorage<String, BatchJob>());
+        String computeArn = service.createComputeEnvironment(json("""
+                {"computeEnvironmentName":"td-attached-ce","type":"MANAGED"}
+                """), REGION).path("computeEnvironmentArn").asText();
+        String queueArn = service.createJobQueue(json("""
+                {"jobQueueName":"td-queue","priority":1,
+                 "computeEnvironmentOrder":[{"order":1,"computeEnvironment":"%s"}]}
+                """.formatted(computeArn)), REGION).path("jobQueueArn").asText();
+
+        AwsException refused = assertThrows(AwsException.class,
+                () -> service.teardownComputeEnvironment(computeArn));
+        assertTrue(refused.getMessage().contains("still associated with a job queue"), refused.getMessage());
+        // The refused teardown left the environment behind, disabled, exactly as AWS would.
+        assertEquals("DISABLED", service.describeComputeEnvironments(json(
+                "{\"computeEnvironments\":[\"td-attached-ce\"]}")).path("computeEnvironments").get(0).path("state").asText());
+
+        assertTrue(service.teardownJobQueue(queueArn), "an ENABLED queue is disabled then deleted");
+        assertFalse(service.teardownJobQueue(queueArn));
+        assertTrue(service.teardownComputeEnvironment(computeArn));
+    }
+
+    @Test
+    void teardownDeregistersAnActiveJobDefinitionOnce() throws Exception {
+        BatchService service = immediateService(new InMemoryStorage<String, BatchJob>());
+        String arn = service.registerJobDefinition(json("""
+                {"jobDefinitionName":"td-def","type":"container",
+                 "containerProperties":{"image":"public.ecr.aws/example/job:latest"}}
+                """), REGION).path("jobDefinitionArn").asText();
+
+        assertTrue(service.teardownJobDefinition(arn));
+        assertEquals("INACTIVE", service.describeJobDefinitions(json("{\"jobDefinitions\":[\"" + arn + "\"]}"))
+                .path("jobDefinitions").get(0).path("status").asText());
+        assertFalse(service.teardownJobDefinition(arn), "an INACTIVE revision counts as gone");
+        assertFalse(service.teardownJobDefinition("arn:aws:batch:us-east-1:000000000000:job-definition/never:1"));
+    }
+
+    // ── tags ─────────────────────────────────────────────────────────────────
+
+    @Test
+    void tagResourceMergesAndUntagResourceRemovesOnEveryTaggableType() throws Exception {
+        BatchService service = immediateService(new InMemoryStorage<String, BatchJob>());
+        String computeArn = service.createComputeEnvironment(json("""
+                {"computeEnvironmentName":"tag-ce","type":"MANAGED","tags":{"team":"a"}}
+                """), REGION).path("computeEnvironmentArn").asText();
+        String queueArn = service.createJobQueue(json("""
+                {"jobQueueName":"tag-queue","priority":1,
+                 "computeEnvironmentOrder":[{"order":1,"computeEnvironment":"%s"}]}
+                """.formatted(computeArn)), REGION).path("jobQueueArn").asText();
+        String definitionArn = service.registerJobDefinition(json("""
+                {"jobDefinitionName":"tag-def","type":"container",
+                 "containerProperties":{"image":"public.ecr.aws/example/job:latest"}}
+                """), REGION).path("jobDefinitionArn").asText();
+
+        for (String arn : List.of(computeArn, queueArn, definitionArn)) {
+            service.tagResource(arn, Map.of("tier", "gold"));
+            service.tagResource(arn, Map.of("env", "blue"));
+            Map<String, String> tags = service.listTagsForResource(arn);
+            assertEquals("gold", tags.get("tier"), arn);
+            assertEquals("blue", tags.get("env"), "an earlier tag survives a later TagResource: " + arn);
+            service.untagResource(arn, List.of("tier", "never-set"));
+            assertEquals(Map.of("env", "blue", "team", "a").entrySet().stream()
+                            .filter(e -> arn.equals(computeArn) || !"team".equals(e.getKey()))
+                            .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue)),
+                    service.listTagsForResource(arn), arn);
+        }
+        // The create-time tags of the compute environment were kept through the merges.
+        assertEquals("a", service.listTagsForResource(computeArn).get("team"));
+
+        AwsException unknown = assertThrows(AwsException.class, () -> service.listTagsForResource(
+                "arn:aws:batch:us-east-1:000000000000:job-queue/never"));
+        assertEquals("ClientException", unknown.getErrorCode());
+        assertThrows(AwsException.class, () -> service.tagResource(queueArn, Map.of()));
+        assertThrows(AwsException.class, () -> service.untagResource(queueArn, List.of()));
     }
 
     private BatchService dockerService(BatchDockerRunner runner) {
