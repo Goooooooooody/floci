@@ -96,6 +96,11 @@ public class AppConfigDataService {
     }
 
     public ConfigurationData getLatestConfiguration(String token) {
+        return getLatestConfiguration(token, null);
+    }
+
+    /** {@code accept} is the caller's Accept header: the AppConfig Agent asks for Ion to evaluate variant flags itself. */
+    public ConfigurationData getLatestConfiguration(String token, String accept) {
         ConfigurationSession session = sessionStore.get(token)
                 .orElseThrow(() -> new AwsException("BadRequestException", "Invalid configuration token", 400));
 
@@ -120,21 +125,70 @@ public class AppConfigDataService {
         sessionStore.delete(token); // Old token is invalid
         sessionStore.put(nextToken, session);
 
-        byte[] content = (version != null) ? resolveContent(session, version) : new byte[0];
-        String contentType = (version != null) ? version.getContentType() : "application/octet-stream";
+        byte[] content = new byte[0];
+        String contentType = "application/octet-stream";
+        if (version != null) {
+            content = resolveContent(session, version, accept);
+            contentType = isIon(content, accept) ? FeatureFlagIonEncoder.CONTENT_TYPE : version.getContentType();
+        }
         String versionLabel = (version != null) ? String.valueOf(version.getVersionNumber()) : "";
 
         return new ConfigurationData(content, contentType, versionLabel, nextToken,
                 pollInterval);
     }
 
-    private byte[] resolveContent(ConfigurationSession session, HostedConfigurationVersion version) {
+    private byte[] resolveContent(ConfigurationSession session, HostedConfigurationVersion version, String accept) {
         ConfigurationProfile profile = appConfigService.getConfigurationProfile(
                 session.getApplicationId(), session.getConfigurationProfileId());
         if (!"AWS.AppConfig.FeatureFlags".equals(profile.getType())) {
             return version.getContent();
         }
+        // As AWS does: a caller that accepts Ion gets variant flags whole, to evaluate against its own context.
+        if (acceptsFeatureFlagIon(accept) && FeatureFlagIonEncoder.hasVariants(version.getContent(), objectMapper)) {
+            byte[] ion = FeatureFlagIonEncoder.encode(version.getContent(), objectMapper);
+            if (ion != null) {
+                return ion;
+            }
+            LOG.warnv("Feature flag profile {0} has variants Floci cannot encode as Ion; returning the stored JSON",
+                    profile.getId());
+        }
         return transformFeatureFlags(version.getContent(), objectMapper);
+    }
+
+    static boolean acceptsFeatureFlagIon(String accept) {
+        if (accept == null) {
+            return false;
+        }
+        for (String range : accept.split(",")) {
+            String[] parts = range.split(";");
+            if (!"application/ion".equalsIgnoreCase(parts[0].trim())) {
+                continue;
+            }
+            boolean featureFlags = false;
+            boolean acceptable = true;
+            for (int i = 1; i < parts.length; i++) {
+                String[] parameter = parts[i].trim().split("=", 2);
+                if (parameter.length != 2) {
+                    continue;
+                }
+                String name = parameter[0].trim();
+                String value = parameter[1].trim();
+                if (name.equalsIgnoreCase("type")) {
+                    featureFlags = "AWS.AppConfig.FeatureFlags".equalsIgnoreCase(value);
+                } else if (name.equalsIgnoreCase("q")) {
+                    acceptable = !value.matches("0(\\.0{0,3})?");
+                }
+            }
+            if (featureFlags && acceptable) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isIon(byte[] content, String accept) {
+        return acceptsFeatureFlagIon(accept) && content.length >= 4
+                && content[0] == (byte) 0xE0 && content[1] == 0x01 && content[2] == 0x00 && content[3] == (byte) 0xEA;
     }
 
     static byte[] transformFeatureFlags(byte[] content, ObjectMapper objectMapper) {
