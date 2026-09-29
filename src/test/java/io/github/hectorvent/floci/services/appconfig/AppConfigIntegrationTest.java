@@ -862,4 +862,67 @@ class AppConfigIntegrationTest {
                 .statusCode(404)
                 .body("__type", equalTo("ResourceNotFoundException"));
     }
+
+    @Test @Order(46)
+    void startConfigurationSessionPrefersIdOverAnotherResourcesName() {
+        // A second environment and profile named after the first ones' IDs: the ID must still select the original.
+        given()
+                .contentType(ContentType.JSON)
+                .body("{\"Name\": \"" + envId + "\"}")
+                .when().post("/applications/" + appId + "/environments")
+                .then().statusCode(201);
+        given()
+                .contentType(ContentType.JSON)
+                .body("{\"Name\": \"" + profileId + "\", \"LocationUri\": \"hosted\", \"Type\": \"AWS.Freeform\"}")
+                .when().post("/applications/" + appId + "/configurationprofiles")
+                .then().statusCode(201);
+
+        String token = given()
+                .contentType(ContentType.JSON)
+                .body("{\"ApplicationIdentifier\": \"" + appId + "\", \"EnvironmentIdentifier\": \"" + envId
+                        + "\", \"ConfigurationProfileIdentifier\": \"" + profileId + "\"}")
+                .when().post("/configurationsessions")
+                .then().statusCode(201)
+                .extract().path("InitialConfigurationToken");
+
+        given()
+                .queryParam("configuration_token", token)
+                .when().get("/configuration")
+                .then()
+                .statusCode(200)
+                .body("foo", notNullValue());
+    }
+
+    @Test @Order(47)
+    void startConfigurationSessionSkipsResourcesWithoutAName() {
+        given()
+                .contentType(ContentType.JSON)
+                .body("{}")
+                .when().post("/applications/" + appId + "/environments")
+                .then().statusCode(201);
+        given()
+                .contentType(ContentType.JSON)
+                .body("{\"LocationUri\": \"hosted\", \"Type\": \"AWS.Freeform\"}")
+                .when().post("/applications/" + appId + "/configurationprofiles")
+                .then().statusCode(201);
+        given()
+                .contentType(ContentType.JSON)
+                .body("{}")
+                .when().post("/applications")
+                .then().statusCode(201);
+
+        given()
+                .contentType(ContentType.JSON)
+                .body("{\"ApplicationIdentifier\": \"test-app\", \"EnvironmentIdentifier\": \"test-env\", "
+                        + "\"ConfigurationProfileIdentifier\": \"test-profile\"}")
+                .when().post("/configurationsessions")
+                .then().statusCode(201);
+        given()
+                .contentType(ContentType.JSON)
+                .body("{\"ApplicationIdentifier\": \"test-app\", \"EnvironmentIdentifier\": \"no-such-env\", "
+                        + "\"ConfigurationProfileIdentifier\": \"test-profile\"}")
+                .when().post("/configurationsessions")
+                .then().statusCode(404)
+                .body("__type", equalTo("ResourceNotFoundException"));
+    }
 }

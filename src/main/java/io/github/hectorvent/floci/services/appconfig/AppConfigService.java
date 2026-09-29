@@ -67,7 +67,7 @@ public class AppConfigService {
     /** The application whose ID or name is {@code idOrName}; the AppConfigData APIs accept either. */
     public Application resolveApplication(String idOrName) {
         return applicationStore.get(idOrName)
-                .or(() -> listApplications().stream().filter(a -> a.getName().equals(idOrName)).findFirst())
+                .or(() -> listApplications().stream().filter(a -> idOrName.equals(a.getName())).findFirst())
                 .orElseThrow(() -> new AwsException("ResourceNotFoundException", "Application not found", 404));
     }
 
@@ -101,9 +101,10 @@ public class AppConfigService {
 
     /** The environment of {@code appId} whose ID or name is {@code idOrName}. */
     public Environment resolveEnvironment(String appId, String idOrName) {
-        return listEnvironments(appId).stream()
-                .filter(e -> e.getId().equals(idOrName) || e.getName().equals(idOrName))
-                .findFirst()
+        // An exact ID always wins over another environment's name, and a direct lookup skips the scan.
+        return environmentStore.get(idOrName)
+                .filter(e -> appId.equals(e.getApplicationId()))
+                .or(() -> listEnvironments(appId).stream().filter(e -> idOrName.equals(e.getName())).findFirst())
                 .orElseThrow(() -> new AwsException("ResourceNotFoundException", "Environment not found", 404));
     }
 
@@ -136,9 +137,9 @@ public class AppConfigService {
 
     /** The configuration profile of {@code appId} whose ID or name is {@code idOrName}. */
     public ConfigurationProfile resolveConfigurationProfile(String appId, String idOrName) {
-        return listConfigurationProfiles(appId).stream()
-                .filter(p -> p.getId().equals(idOrName) || p.getName().equals(idOrName))
-                .findFirst()
+        return profileStore.get(idOrName)
+                .filter(p -> appId.equals(p.getApplicationId()))
+                .or(() -> listConfigurationProfiles(appId).stream().filter(p -> idOrName.equals(p.getName())).findFirst())
                 .orElseThrow(() -> new AwsException("ResourceNotFoundException", "Configuration profile not found", 404));
     }
 
