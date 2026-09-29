@@ -66,9 +66,6 @@ public class AppConfigService {
 
     /** The application whose ID or name is {@code idOrName}; the AppConfigData APIs accept either. */
     public Application resolveApplication(String idOrName) {
-        if (idOrName == null) {
-            throw new AwsException("ResourceNotFoundException", "Application not found", 404);
-        }
         return applicationStore.get(idOrName)
                 .or(() -> listApplications().stream().filter(a -> idOrName.equals(a.getName())).findFirst())
                 .orElseThrow(() -> new AwsException("ResourceNotFoundException", "Application not found", 404));
@@ -104,9 +101,6 @@ public class AppConfigService {
 
     /** The environment of {@code appId} whose ID or name is {@code idOrName}. */
     public Environment resolveEnvironment(String appId, String idOrName) {
-        if (idOrName == null) {
-            throw new AwsException("ResourceNotFoundException", "Environment not found", 404);
-        }
         // An exact ID always wins over another environment's name, and a direct lookup skips the scan.
         return environmentStore.get(idOrName)
                 .filter(e -> appId.equals(e.getApplicationId()))
@@ -143,9 +137,6 @@ public class AppConfigService {
 
     /** The configuration profile of {@code appId} whose ID or name is {@code idOrName}. */
     public ConfigurationProfile resolveConfigurationProfile(String appId, String idOrName) {
-        if (idOrName == null) {
-            throw new AwsException("ResourceNotFoundException", "Configuration profile not found", 404);
-        }
         return profileStore.get(idOrName)
                 .filter(p -> appId.equals(p.getApplicationId()))
                 .or(() -> listConfigurationProfiles(appId).stream().filter(p -> idOrName.equals(p.getName())).findFirst())

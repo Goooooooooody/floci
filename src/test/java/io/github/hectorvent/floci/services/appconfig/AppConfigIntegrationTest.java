@@ -927,7 +927,7 @@ class AppConfigIntegrationTest {
     }
 
     @Test @Order(48)
-    void startConfigurationSessionWithoutAnIdentifierIsNotFoundNotAServerError() {
+    void startConfigurationSessionWithoutAnIdentifierIsABadRequest() {
         for (String missing : new String[] {"ApplicationIdentifier", "EnvironmentIdentifier", "ConfigurationProfileIdentifier"}) {
             String body = "{\"ApplicationIdentifier\": \"test-app\", \"EnvironmentIdentifier\": \"test-env\", "
                     + "\"ConfigurationProfileIdentifier\": \"test-profile\"}";
@@ -937,8 +937,8 @@ class AppConfigIntegrationTest {
                     .body(body)
                     .when().post("/configurationsessions")
                     .then()
-                    .statusCode(404)
-                    .body("__type", equalTo("ResourceNotFoundException"));
+                    .statusCode(400)
+                    .body("__type", equalTo("BadRequestException"));
         }
     }
 }

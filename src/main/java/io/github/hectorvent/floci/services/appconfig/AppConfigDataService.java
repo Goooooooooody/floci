@@ -43,6 +43,10 @@ public class AppConfigDataService {
         String envId = (String) request.get("EnvironmentIdentifier");
         String profileId = (String) request.get("ConfigurationProfileIdentifier");
 
+        requireIdentifier(appId, "ApplicationIdentifier");
+        requireIdentifier(envId, "EnvironmentIdentifier");
+        requireIdentifier(profileId, "ConfigurationProfileIdentifier");
+
         // Like AWS, each identifier is either the resource's ID or its name.
         Application application = appConfigService.resolveApplication(appId);
         Environment environment = appConfigService.resolveEnvironment(application.getId(), envId);
@@ -77,6 +81,12 @@ public class AppConfigDataService {
             return (int) interval;
         } catch (NumberFormatException | ArithmeticException e) {
             throw invalidPollInterval();
+        }
+    }
+
+    private static void requireIdentifier(String value, String name) {
+        if (value == null || value.isBlank()) {
+            throw new AwsException("BadRequestException", name + " is required", 400);
         }
     }
 
