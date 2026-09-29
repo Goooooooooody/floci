@@ -128,8 +128,9 @@ public class AppConfigDataService {
         byte[] content = new byte[0];
         String contentType = "application/octet-stream";
         if (version != null) {
-            content = resolveContent(session, version, accept);
-            contentType = isIon(content, accept) ? FeatureFlagIonEncoder.CONTENT_TYPE : version.getContentType();
+            ResolvedContent resolved = resolveContent(session, version, accept);
+            content = resolved.bytes();
+            contentType = resolved.contentType();
         }
         String versionLabel = (version != null) ? String.valueOf(version.getVersionNumber()) : "";
 
@@ -137,22 +138,24 @@ public class AppConfigDataService {
                 pollInterval);
     }
 
-    private byte[] resolveContent(ConfigurationSession session, HostedConfigurationVersion version, String accept) {
+    private ResolvedContent resolveContent(ConfigurationSession session, HostedConfigurationVersion version,
+                                           String accept) {
         ConfigurationProfile profile = appConfigService.getConfigurationProfile(
                 session.getApplicationId(), session.getConfigurationProfileId());
         if (!"AWS.AppConfig.FeatureFlags".equals(profile.getType())) {
-            return version.getContent();
+            return new ResolvedContent(version.getContent(), version.getContentType());
         }
         // As AWS does: a caller that accepts Ion gets variant flags whole, to evaluate against its own context.
         if (acceptsFeatureFlagIon(accept) && FeatureFlagIonEncoder.hasVariants(version.getContent(), objectMapper)) {
             byte[] ion = FeatureFlagIonEncoder.encode(version.getContent(), objectMapper);
             if (ion != null) {
-                return ion;
+                return new ResolvedContent(ion, FeatureFlagIonEncoder.CONTENT_TYPE);
             }
             LOG.warnv("Feature flag profile {0} has variants Floci cannot encode as Ion; returning the stored JSON",
                     profile.getId());
         }
-        return transformFeatureFlags(version.getContent(), objectMapper);
+        return new ResolvedContent(transformFeatureFlags(version.getContent(), objectMapper),
+                version.getContentType());
     }
 
     static boolean acceptsFeatureFlagIon(String accept) {
@@ -176,7 +179,7 @@ public class AppConfigDataService {
                 if (name.equalsIgnoreCase("type")) {
                     featureFlags = "AWS.AppConfig.FeatureFlags".equalsIgnoreCase(value);
                 } else if (name.equalsIgnoreCase("q")) {
-                    acceptable = !value.matches("0(\\.0{0,3})?");
+                    acceptable = !value.matches("0(\\.0+)?");
                 }
             }
             if (featureFlags && acceptable) {
@@ -184,11 +187,6 @@ public class AppConfigDataService {
             }
         }
         return false;
-    }
-
-    private static boolean isIon(byte[] content, String accept) {
-        return acceptsFeatureFlagIon(accept) && content.length >= 4
-                && content[0] == (byte) 0xE0 && content[1] == 0x01 && content[2] == 0x00 && content[3] == (byte) 0xEA;
     }
 
     static byte[] transformFeatureFlags(byte[] content, ObjectMapper objectMapper) {
@@ -243,6 +241,8 @@ public class AppConfigDataService {
     static int normalizePollInterval(int interval) {
         return interval >= 15 && interval <= 86400 ? interval : 15;
     }
+
+    private record ResolvedContent(byte[] bytes, String contentType) {}
 
     public record ConfigurationData(byte[] content, String contentType, String configurationVersion,
                                     String nextPollConfigurationToken, int nextPollIntervalInSeconds) {}

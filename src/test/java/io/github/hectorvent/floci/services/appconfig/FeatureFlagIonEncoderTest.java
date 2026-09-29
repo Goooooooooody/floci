@@ -7,6 +7,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.HexFormat;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -43,11 +44,24 @@ class FeatureFlagIonEncoderTest {
             + "8ea67b225f76617269616e74223a2264656661756c74222c22656e61626c6564223a66616c73657d"
             + "eeab81b1bea78ea57b225f76617269616e74223a2264656661756c74222c22656e61626c6564223a747275657d";
 
+    private static final String EXPECTED_TEXT = "promo::["
+            + "uk::[(eq $storeId \"uk\"), '''{\"_variant\":\"uk\",\"enabled\":true,\"storeId\":\"uk\"}'''],"
+            + "ie::[(eq $storeId \"ie\"), '''{\"_variant\":\"ie\",\"enabled\":false}'''],"
+            + "'''{\"_variant\":\"default\",\"enabled\":false}'''] "
+            + "plain::['''{\"_variant\":\"default\",\"enabled\":true}''']";
+
     @Test
     void encodesVariantFlagsAsAwsDoes() {
         byte[] ion = FeatureFlagIonEncoder.encode(VARIANT_FLAGS.getBytes(StandardCharsets.UTF_8), MAPPER);
 
         assertArrayEquals(HexFormat.of().parseHex(EXPECTED_ION), ion);
+    }
+
+    @Test
+    void readsBackAsIonWithTheSharedTablesImported() {
+        byte[] ion = FeatureFlagIonEncoder.encode(VARIANT_FLAGS.getBytes(StandardCharsets.UTF_8), MAPPER);
+
+        assertEquals(IonTestSupport.parse(EXPECTED_TEXT), IonTestSupport.decode(ion));
     }
 
     @Test
@@ -94,6 +108,8 @@ class FeatureFlagIonEncoderTest {
         assertTrue(AppConfigDataService.acceptsFeatureFlagIon("application/ion; type=AWS.AppConfig.FeatureFlags"));
         assertTrue(AppConfigDataService.acceptsFeatureFlagIon("text/plain, Application/ION;Type=aws.appconfig.featureflags"));
         assertFalse(AppConfigDataService.acceptsFeatureFlagIon("application/ion;type=AWS.AppConfig.FeatureFlags;q=0"));
+        assertFalse(AppConfigDataService.acceptsFeatureFlagIon("application/ion;type=AWS.AppConfig.FeatureFlags;q=0.0000"));
+        assertTrue(AppConfigDataService.acceptsFeatureFlagIon("application/ion;type=AWS.AppConfig.FeatureFlags;q=0.5"));
         assertFalse(AppConfigDataService.acceptsFeatureFlagIon("application/ion;type=Other"));
         assertFalse(AppConfigDataService.acceptsFeatureFlagIon("application/ion"));
         assertFalse(AppConfigDataService.acceptsFeatureFlagIon("application/json"));
