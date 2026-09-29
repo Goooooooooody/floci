@@ -925,4 +925,20 @@ class AppConfigIntegrationTest {
                 .then().statusCode(404)
                 .body("__type", equalTo("ResourceNotFoundException"));
     }
+
+    @Test @Order(48)
+    void startConfigurationSessionWithoutAnIdentifierIsNotFoundNotAServerError() {
+        for (String missing : new String[] {"ApplicationIdentifier", "EnvironmentIdentifier", "ConfigurationProfileIdentifier"}) {
+            String body = "{\"ApplicationIdentifier\": \"test-app\", \"EnvironmentIdentifier\": \"test-env\", "
+                    + "\"ConfigurationProfileIdentifier\": \"test-profile\"}";
+            body = body.replaceFirst("\"" + missing + "\": \"[^\"]*\"(, )?", "").replaceFirst(", }$", "}");
+            given()
+                    .contentType(ContentType.JSON)
+                    .body(body)
+                    .when().post("/configurationsessions")
+                    .then()
+                    .statusCode(404)
+                    .body("__type", equalTo("ResourceNotFoundException"));
+        }
+    }
 }
