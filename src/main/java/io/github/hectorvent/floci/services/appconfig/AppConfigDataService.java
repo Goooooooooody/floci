@@ -7,8 +7,10 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
+import io.github.hectorvent.floci.services.appconfig.model.Application;
 import io.github.hectorvent.floci.services.appconfig.model.ConfigurationProfile;
 import io.github.hectorvent.floci.services.appconfig.model.ConfigurationSession;
+import io.github.hectorvent.floci.services.appconfig.model.Environment;
 import io.github.hectorvent.floci.services.appconfig.model.HostedConfigurationVersion;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -41,9 +43,13 @@ public class AppConfigDataService {
         String envId = (String) request.get("EnvironmentIdentifier");
         String profileId = (String) request.get("ConfigurationProfileIdentifier");
 
-        // Validate resources exist
-        appConfigService.getEnvironment(appId, envId);
-        appConfigService.getConfigurationProfile(appId, profileId);
+        // Like AWS, each identifier is either the resource's ID or its name.
+        Application application = appConfigService.resolveApplication(appId);
+        Environment environment = appConfigService.resolveEnvironment(application.getId(), envId);
+        ConfigurationProfile profile = appConfigService.resolveConfigurationProfile(application.getId(), profileId);
+        appId = application.getId();
+        envId = environment.getId();
+        profileId = profile.getId();
 
         ConfigurationSession session = new ConfigurationSession();
         session.setId(UUID.randomUUID().toString());

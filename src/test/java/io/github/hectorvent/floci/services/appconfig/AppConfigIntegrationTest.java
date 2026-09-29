@@ -831,4 +831,35 @@ class AppConfigIntegrationTest {
                 .body("disabled.enabled", equalTo(false))
                 .body("disabled.secret", nullValue());
     }
+
+    @Test @Order(44)
+    void startConfigurationSessionAcceptsResourceNames() {
+        String token = given()
+                .contentType(ContentType.JSON)
+                .body("{\"ApplicationIdentifier\": \"test-app\", \"EnvironmentIdentifier\": \"test-env\", "
+                        + "\"ConfigurationProfileIdentifier\": \"test-profile\"}")
+                .when().post("/configurationsessions")
+                .then()
+                .statusCode(201)
+                .extract().path("InitialConfigurationToken");
+
+        given()
+                .queryParam("configuration_token", token)
+                .when().get("/configuration")
+                .then()
+                .statusCode(200)
+                .body("foo", notNullValue());
+    }
+
+    @Test @Order(45)
+    void startConfigurationSessionRejectsUnknownEnvironmentName() {
+        given()
+                .contentType(ContentType.JSON)
+                .body("{\"ApplicationIdentifier\": \"test-app\", \"EnvironmentIdentifier\": \"no-such-env\", "
+                        + "\"ConfigurationProfileIdentifier\": \"test-profile\"}")
+                .when().post("/configurationsessions")
+                .then()
+                .statusCode(404)
+                .body("__type", equalTo("ResourceNotFoundException"));
+    }
 }
