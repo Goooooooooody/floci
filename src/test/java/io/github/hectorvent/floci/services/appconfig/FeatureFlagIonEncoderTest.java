@@ -75,12 +75,22 @@ class FeatureFlagIonEncoderTest {
     }
 
     @Test
-    void aFlagWithoutVariantsKeepsItsOwnAttributesAsItsDefault() {
-        byte[] ion = FeatureFlagIonEncoder.encode(
-                "{\"values\":{\"basic\":{\"enabled\":true,\"limit\":5}}}".getBytes(StandardCharsets.UTF_8), MAPPER);
+    void encodesABasicFlagAsAStringOfItsRetrievalValue() {
+        String mixed = "{\"values\":{"
+                + "\"promo\":{\"_variants\":["
+                + "{\"enabled\":true,\"name\":\"uk\",\"rule\":\"(eq $storeId \\\"uk\\\")\"},"
+                + "{\"enabled\":false,\"name\":\"default\"}]},"
+                + "\"basic\":{\"enabled\":true,\"limit\":5,\"_createdAt\":\"2026-01-01T00:00:00Z\"},"
+                + "\"off\":{\"enabled\":false,\"limit\":5}}}";
 
-        String text = new String(ion, StandardCharsets.ISO_8859_1);
-        assertTrue(text.contains("{\"_variant\":\"default\",\"enabled\":true,\"limit\":5}"));
+        byte[] ion = FeatureFlagIonEncoder.encode(mixed.getBytes(StandardCharsets.UTF_8), MAPPER);
+
+        assertEquals(IonTestSupport.parse("promo::["
+                        + "uk::[(eq $storeId \"uk\"), '''{\"_variant\":\"uk\",\"enabled\":true}'''],"
+                        + "'''{\"_variant\":\"default\",\"enabled\":false}'''] "
+                        + "basic::'''{\"enabled\":true,\"limit\":5}''' "
+                        + "off::'''{\"enabled\":false}'''"),
+                IonTestSupport.decode(ion));
     }
 
     @Test

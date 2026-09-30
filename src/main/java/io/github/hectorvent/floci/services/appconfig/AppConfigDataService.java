@@ -3,6 +3,7 @@ package io.github.hectorvent.floci.services.appconfig;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
@@ -207,28 +208,12 @@ public class AppConfigDataService {
             Iterator<Map.Entry<String, JsonNode>> fields = values.fields();
             while (fields.hasNext()) {
                 Map.Entry<String, JsonNode> entry = fields.next();
-                JsonNode definition = entry.getValue();
-                if (!definition.isObject()) {
+                // Multi-variant feature flags require context evaluation and Amazon Ion output, which only a
+                // caller that accepts Ion gets; preserve the stored bytes for any other.
+                ObjectNode flag = retrievalFlag(entry.getValue());
+                if (flag == null) {
                     return content;
                 }
-                // Multi-variant feature flags require context evaluation and Amazon Ion output.
-                // Preserve the stored bytes until that retrieval path is implemented.
-                if (definition.has("_variants")) {
-                    return content;
-                }
-                JsonNode enabled = definition.get("enabled");
-                if (enabled == null || !enabled.isBoolean()) {
-                    return content;
-                }
-
-                if (!enabled.booleanValue()) {
-                    retrieval.putObject(entry.getKey()).put("enabled", false);
-                    continue;
-                }
-
-                ObjectNode flag = definition.deepCopy();
-                flag.remove("_createdAt");
-                flag.remove("_updatedAt");
                 retrieval.set(entry.getKey(), flag);
             }
             return objectMapper.writeValueAsBytes(retrieval);
@@ -236,6 +221,27 @@ public class AppConfigDataService {
             LOG.debugv(e, "Could not convert AppConfig feature flags to retrieval format");
             return content;
         }
+    }
+
+    /**
+     * A basic flag's value in the retrieval-time format: only {@code enabled} if it is off, else its attributes too.
+     * {@code null} for a flag with variants or one that is not a valid basic flag.
+     */
+    static ObjectNode retrievalFlag(JsonNode definition) {
+        if (!definition.isObject() || definition.has("_variants")) {
+            return null;
+        }
+        JsonNode enabled = definition.get("enabled");
+        if (enabled == null || !enabled.isBoolean()) {
+            return null;
+        }
+        if (!enabled.booleanValue()) {
+            return JsonNodeFactory.instance.objectNode().put("enabled", false);
+        }
+        ObjectNode flag = definition.deepCopy();
+        flag.remove("_createdAt");
+        flag.remove("_updatedAt");
+        return flag;
     }
 
     static int normalizePollInterval(int interval) {

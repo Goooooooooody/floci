@@ -971,7 +971,8 @@ class AppConfigIntegrationTest {
         String content = "{\"flags\":{},\"version\":\"1\",\"values\":{\"promo\":{\"_variants\":["
                 + "{\"attributeValues\":{\"storeId\":\"uk\"},\"enabled\":true,\"name\":\"uk\","
                 + "\"rule\":\"(eq $storeId \\\"uk\\\")\"},"
-                + "{\"enabled\":false,\"name\":\"default\"}]}}}";
+                + "{\"enabled\":false,\"name\":\"default\"}]},"
+                + "\"banner\":{\"enabled\":true,\"colour\":\"red\"}}}";
 
         given()
                 .header("Content-Type", "application/json")
@@ -1009,7 +1010,8 @@ class AppConfigIntegrationTest {
                 .extract().asByteArray();
         assertEquals(IonTestSupport.parse("promo::[uk::[(eq $storeId \"uk\"), "
                         + "'''{\"_variant\":\"uk\",\"enabled\":true,\"storeId\":\"uk\"}'''],"
-                        + "'''{\"_variant\":\"default\",\"enabled\":false}''']"),
+                        + "'''{\"_variant\":\"default\",\"enabled\":false}'''] "
+                        + "banner::'''{\"enabled\":true,\"colour\":\"red\"}'''"),
                 IonTestSupport.decode(ion));
 
         // Without Accept for Ion, the stored document, as before.

@@ -20,9 +20,12 @@ import java.util.regex.Pattern;
  * accepts {@code application/ion;type=AWS.AppConfig.FeatureFlags}, as the AppConfig Agent does. Unlike the JSON
  * retrieval format it keeps each flag's variants and rules, for the caller to evaluate against its own context.
  *
- * <p>The layout follows captured AWS responses: a local symbol table importing AWS's shared {@code ops} and
- * {@code anns} tables, then a list per flag, annotated with its key. Each variant is a list annotated with its name,
- * holding its rule as an s-expression and its attributes as a JSON string; the default is that JSON string alone.
+ * <p>The layout is the one documented for the agent's local development mode
+ * (https://docs.aws.amazon.com/appconfig/latest/userguide/appconfig-agent-how-to-use-local-development-samples.html):
+ * each flag is a value annotated with its key. A basic flag is its retrieval-time JSON as a string; a flag with
+ * variants is a list of its variants, each a list holding its rule as an s-expression and its content as a JSON
+ * string, then its default's content alone. The binary stream, like AWS's, also has a local symbol table importing
+ * AWS's shared {@code ops} and {@code anns} tables and annotates each variant with its name.
  * Only {@code (eq $attribute "value")} rules are encoded; {@link #encode} returns {@code null} for any other.
  */
 final class FeatureFlagIonEncoder {
@@ -98,33 +101,28 @@ final class FeatureFlagIonEncoder {
             return null;
         }
         int keySid = intern(key);
+        JsonNode variants = flag.get("_variants");
+        if (variants == null || !variants.isArray() || variants.isEmpty()) {
+            // A basic flag is its value in the JSON retrieval format, as a string.
+            ObjectNode retrieval = AppConfigDataService.retrievalFlag(flag);
+            return retrieval == null ? null : annotated(keySid, string(objectMapper.writeValueAsString(retrieval)));
+        }
         ByteArrayOutputStream items = new ByteArrayOutputStream();
         String defaultJson = null;
-        JsonNode variants = flag.get("_variants");
-        if (variants != null && variants.isArray() && !variants.isEmpty()) {
-            for (JsonNode variant : variants) {
-                if (!variant.path("enabled").isBoolean()) {
+        for (JsonNode variant : variants) {
+            if (!variant.path("enabled").isBoolean()) {
+                return null;
+            }
+            if (variant.hasNonNull("rule")) {
+                byte[] encoded = variant(variant, objectMapper);
+                if (encoded == null) {
                     return null;
                 }
-                if (variant.hasNonNull("rule")) {
-                    byte[] encoded = variant(variant, objectMapper);
-                    if (encoded == null) {
-                        return null;
-                    }
-                    items.write(encoded);
-                } else {
-                    defaultJson = variantJson(variant.path("name").asText("default"), variant.get("enabled"),
-                            variant.get("attributeValues"), objectMapper);
-                }
+                items.write(encoded);
+            } else {
+                defaultJson = variantJson(variant.path("name").asText("default"), variant.get("enabled"),
+                        variant.get("attributeValues"), objectMapper);
             }
-        } else if (flag.path("enabled").isBoolean()) {
-            ObjectNode attributes = objectMapper.createObjectNode();
-            flag.fields().forEachRemaining(f -> {
-                if (!f.getKey().equals("enabled") && !f.getKey().startsWith("_")) {
-                    attributes.set(f.getKey(), f.getValue());
-                }
-            });
-            defaultJson = variantJson("default", flag.get("enabled"), attributes, objectMapper);
         }
         if (defaultJson == null) {
             return null;
